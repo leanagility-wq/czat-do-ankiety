@@ -142,6 +142,33 @@ async def fetch_catalog(session: AsyncSession) -> dict:
                 if item.strip()
             ],
         },
+        "ordered_dimensions": {
+            "experience_group": {
+                "ordered_values_low_to_high": [
+                    value
+                    for value in ["1-3 lata", "3-5 lat", "5-10 lat", "10+ lat", "Inne"]
+                    if value in experience_groups
+                ],
+                "semantic_extremes": {
+                    "lowest": next((value for value in ["1-3 lata", "Inne"] if value in experience_groups), None),
+                    "highest": next((value for value in ["10+ lat", "5-10 lat"] if value in experience_groups), None),
+                },
+            },
+            "ai_usage_frequency": {
+                "ordered_values_low_to_high": [
+                    value
+                    for value in ["Rzadziej niż raz w tygodniu", "Raz na kilka dni", "Codziennie"]
+                    if any(
+                        row.field_name == "ai_usage_frequency" and value in (row.allowed_values or "")
+                        for row in metadata_rows
+                    )
+                ],
+                "semantic_extremes": {
+                    "lowest": "Rzadziej niż raz w tygodniu",
+                    "highest": "Codziennie",
+                },
+            },
+        },
         "aggregate_metrics": metric_names,
         "aggregate_segments": [
             {
@@ -307,6 +334,57 @@ async def fetch_numeric_summary(
             "employment_status": employment_status,
         },
     }
+
+
+async def fetch_categorical_distribution(
+    session: AsyncSession,
+    *,
+    field_name: str,
+    role_group: str | None = None,
+    experience_group: str | None = None,
+    company_type: str | None = None,
+    company_size_group: str | None = None,
+    employment_status: str | None = None,
+    limit: int = 8,
+) -> list[dict]:
+    column = getattr(Response, field_name, None)
+    if column is None:
+        return []
+
+    query = (
+        select(column.label("value"), func.count(column).label("count"))
+        .where(column.is_not(None))
+        .where(column != "")
+        .group_by(column)
+    )
+    query = _apply_response_filters(
+        query,
+        role_group=role_group,
+        experience_group=experience_group,
+        company_type=company_type,
+        company_size_group=company_size_group,
+        employment_status=employment_status,
+    )
+    query = query.order_by(func.count(column).desc(), column.asc()).limit(limit)
+    rows = (await session.execute(query)).all()
+    total_n = sum(int(count) for _, count in rows)
+    return [
+        {
+            "field_name": field_name,
+            "value": value,
+            "count": int(count),
+            "share": (int(count) / total_n) if total_n else 0.0,
+            "n": total_n,
+            "filters": {
+                "role_group": role_group,
+                "experience_group": experience_group,
+                "company_type": company_type,
+                "company_size_group": company_size_group,
+                "employment_status": employment_status,
+            },
+        }
+        for value, count in rows
+    ]
 
 
 async def fetch_text_responses(

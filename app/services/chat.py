@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models import Aggregate, Correlation, OpenTopic
 from app.repositories.survey import (
+    fetch_categorical_distribution,
     fetch_aggregate_rows,
     fetch_catalog,
     fetch_correlation_row,
@@ -14,6 +15,7 @@ from app.repositories.survey import (
     fetch_text_responses,
 )
 from app.schemas import (
+    CategoricalStatsPlanRequest,
     ChatResponse,
     CorrelationPlanRequest,
     GroundedAnswer,
@@ -112,6 +114,31 @@ RETRIEVAL_PLAN_SCHEMA = {
                 ],
             },
         },
+        "categorical_stats_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "field_name": {"type": "string"},
+                    "role_group": {"type": ["string", "null"]},
+                    "experience_group": {"type": ["string", "null"]},
+                    "company_type": {"type": ["string", "null"]},
+                    "company_size_group": {"type": ["string", "null"]},
+                    "employment_status": {"type": ["string", "null"]},
+                    "limit": {"type": "integer"},
+                },
+                "required": [
+                    "field_name",
+                    "role_group",
+                    "experience_group",
+                    "company_type",
+                    "company_size_group",
+                    "employment_status",
+                    "limit",
+                ],
+            },
+        },
         "text_response_requests": {
             "type": "array",
             "items": {
@@ -147,6 +174,7 @@ RETRIEVAL_PLAN_SCHEMA = {
         "correlation_requests",
         "open_topic_requests",
         "numeric_stats_requests",
+        "categorical_stats_requests",
         "text_response_requests",
     ],
 }
@@ -179,13 +207,31 @@ def build_planner_system_prompt() -> str:
         "Jeśli pytanie wykracza poza ankietę, ustaw is_in_scope=false. "
         "Nie wymyślaj nazw metryk, pól ani grup spoza katalogu. "
         "Używaj nazw pól, filtrów i wartości dokładnie takich, jakie są w katalogu. "
+        "Interpretuj pytanie semantycznie na podstawie question_text, a nie tylko literalnych nazw field_name. "
+        "Jeżeli użytkownik używa parafraz typu 'staż zawodowy', 'doświadczenie', 'najkrótszy staż', odnoś je do odpowiednich wymiarów i uporządkowanych wartości z katalogu. "
+        "Jeżeli użytkownik pyta 'jak często używają narzędzi AI', traktuj to jako pytanie o pole lub metrykę związaną z ai_usage_frequency. "
+        "Jeżeli pytanie wygląda na mieszczące się w ankiecie, nie oznaczaj go jako out of scope tylko dlatego, że nie używa dokładnych nazw z katalogu. "
         "Dla pytań o zależności używaj correlations. "
         "Dla pytań o liczebności i gotowe agregaty używaj aggregates. "
         "Dla pytań o skale lub pola liczbowe z dodatkowymi filtrami używaj numeric_stats_requests. "
+        "Dla pytań o rozkład odpowiedzi w polach kategorycznych z filtrami używaj categorical_stats_requests. "
         "Dla pytań o pełne cytaty, najdłuższe wypowiedzi, przykłady odpowiedzi otwartych i selekcję tekstów używaj text_response_requests. "
         "Dla pytań o tematy, obawy, kompetencje i grupy tematów używaj open_topic_requests. "
         "Jeśli pytanie prosi o cytaty lub pełne wypowiedzi, preferuj text_response_requests nad samym open_topic_requests. "
-        "Jeśli pytanie wymaga filtrowania, użyj response_filter_dimensions i allowed_values z katalogu."
+        "Jeśli pytanie wymaga filtrowania, użyj response_filter_dimensions i allowed_values z katalogu. "
+        "Jeśli pytanie używa pojęć względnych typu 'najkrótszy', 'najdłuższy', 'najwyższy', 'najniższy', użyj ordered_dimensions z katalogu."
+    )
+
+
+def build_recovery_planner_system_prompt() -> str:
+    return (
+        "Jesteś plannerem odzyskującym intencję pytania do chatbota ankietowego. "
+        "Masz spróbować jeszcze raz zaplanować pobranie danych WYŁĄCZNIE z katalogu ankiety. "
+        "Zakładaj in-scope, jeśli pytanie można rozsądnie powiązać z question_text, allowed_values, ordered_dimensions albo response_filter_dimensions. "
+        "Nie wymagaj dosłownego dopasowania słów. "
+        "Przykład: 'staż zawodowy' może odnosić się do experience_group, jeśli to jedyny wymiar doświadczenia w katalogu. "
+        "Przykład: 'jak często używają narzędzi AI' może odnosić się do ai_usage_frequency lub gotowych agregatów opartych o ai_usage_frequency. "
+        "Jeśli pytanie naprawdę wykracza poza ankietę, dopiero wtedy ustaw is_in_scope=false."
     )
 
 
@@ -267,6 +313,10 @@ def compute_warning_from_context(context_payload: dict) -> str | None:
     for item in context_payload["numeric_stats"]:
         if isinstance(item["row"].get("n"), int):
             sample_sizes.append(item["row"]["n"])
+    for item in context_payload["categorical_stats"]:
+        for row in item["rows"]:
+            if isinstance(row.get("n"), int):
+                sample_sizes.append(row["n"])
     for item in context_payload["text_responses"]:
         sample_sizes.append(len({row["response_id"] for row in item["rows"]}))
     if not sample_sizes:
@@ -278,6 +328,7 @@ def build_planner_catalog(catalog: dict) -> dict:
     return {
         "question_metadata": catalog["question_metadata"],
         "response_filter_dimensions": catalog["response_filter_dimensions"],
+        "ordered_dimensions": catalog["ordered_dimensions"],
         "raw_numeric_fields": catalog["raw_numeric_fields"],
         "raw_open_text_fields": catalog["raw_open_text_fields"],
         "aggregate_metrics": catalog["aggregate_metrics"],
@@ -288,6 +339,14 @@ def build_planner_catalog(catalog: dict) -> dict:
 
 
 async def plan_retrieval(question: str, catalog: dict) -> RetrievalPlan:
+    return await _plan_retrieval_with_prompt(question, catalog, build_planner_system_prompt())
+
+
+async def plan_retrieval_recovery(question: str, catalog: dict) -> RetrievalPlan:
+    return await _plan_retrieval_with_prompt(question, catalog, build_recovery_planner_system_prompt())
+
+
+async def _plan_retrieval_with_prompt(question: str, catalog: dict, system_prompt: str) -> RetrievalPlan:
     planner_catalog = build_planner_catalog(catalog)
     user_prompt = (
         f"Pytanie użytkownika:\n{question}\n\n"
@@ -295,7 +354,7 @@ async def plan_retrieval(question: str, catalog: dict) -> RetrievalPlan:
         f"{json.dumps(planner_catalog, ensure_ascii=False, indent=2)}"
     )
     raw_plan = await openai_client.create_json_completion(
-        system_prompt=build_planner_system_prompt(),
+        system_prompt=system_prompt,
         user_prompt=user_prompt,
         schema_name="retrieval_plan",
         schema=RETRIEVAL_PLAN_SCHEMA,
@@ -389,6 +448,23 @@ def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> Retrieval
         and is_allowed_filter(request.employment_status, employment_statuses)
     ]
 
+    categorical_allowed_fields = {
+        item["field_name"]
+        for item in catalog["question_metadata"]
+        if item["question_type"] in {"single_choice", "multi_choice"}
+    }
+
+    allowed_categorical_stats = [
+        request
+        for request in plan.categorical_stats_requests
+        if request.field_name in categorical_allowed_fields
+        and is_allowed_filter(request.role_group, role_groups)
+        and is_allowed_filter(request.experience_group, experience_groups)
+        and is_allowed_filter(request.company_type, company_types)
+        and is_allowed_filter(request.company_size_group, company_sizes)
+        and is_allowed_filter(request.employment_status, employment_statuses)
+    ]
+
     allowed_text_responses = [
         request
         for request in plan.text_response_requests
@@ -407,6 +483,7 @@ def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> Retrieval
         correlation_requests=allowed_correlations,
         open_topic_requests=allowed_open_topics,
         numeric_stats_requests=allowed_numeric_stats,
+        categorical_stats_requests=allowed_categorical_stats,
         text_response_requests=allowed_text_responses,
     )
 
@@ -484,6 +561,26 @@ async def execute_plan(session: AsyncSession, plan: RetrievalPlan) -> dict:
                 }
             )
 
+    categorical_stats_context: list[dict] = []
+    for request in plan.categorical_stats_requests:
+        rows = await fetch_categorical_distribution(
+            session,
+            field_name=request.field_name,
+            role_group=request.role_group,
+            experience_group=request.experience_group,
+            company_type=request.company_type,
+            company_size_group=request.company_size_group,
+            employment_status=request.employment_status,
+            limit=min(max(request.limit, 1), 12),
+        )
+        if rows:
+            categorical_stats_context.append(
+                {
+                    "request": request.model_dump(),
+                    "rows": rows,
+                }
+            )
+
     text_responses_context: list[dict] = []
     for request in plan.text_response_requests:
         rows = await fetch_text_responses(
@@ -510,6 +607,7 @@ async def execute_plan(session: AsyncSession, plan: RetrievalPlan) -> dict:
         "correlations": correlations_context,
         "open_topics": open_topics_context,
         "numeric_stats": numeric_stats_context,
+        "categorical_stats": categorical_stats_context,
         "text_responses": text_responses_context,
     }
 
@@ -540,6 +638,17 @@ async def answer_question(question: str, session: AsyncSession) -> ChatResponse:
     try:
         catalog = await fetch_catalog(session)
         plan = await plan_retrieval(question, catalog)
+        if not plan.is_in_scope or (
+            not plan.aggregate_requests
+            and not plan.correlation_requests
+            and not plan.open_topic_requests
+            and not plan.numeric_stats_requests
+            and not plan.categorical_stats_requests
+            and not plan.text_response_requests
+        ):
+            recovery_plan = await plan_retrieval_recovery(question, catalog)
+            if recovery_plan.is_in_scope:
+                plan = recovery_plan
 
         if not plan.is_in_scope:
             return ChatResponse(

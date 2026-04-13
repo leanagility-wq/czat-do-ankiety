@@ -56,6 +56,16 @@ class NumericStatsPlanRequest(BaseModel):
     employment_status: str | None = None
 
 
+class CategoricalStatsPlanRequest(BaseModel):
+    field_name: str
+    role_group: str | None = None
+    experience_group: str | None = None
+    company_type: str | None = None
+    company_size_group: str | None = None
+    employment_status: str | None = None
+    limit: int = 8
+
+
 class TextResponsePlanRequest(BaseModel):
     field_name: str
     role_group: str | None = None
@@ -73,6 +83,7 @@ class RetrievalPlan(BaseModel):
     correlation_requests: list[CorrelationPlanRequest] = Field(default_factory=list)
     open_topic_requests: list[OpenTopicPlanRequest] = Field(default_factory=list)
     numeric_stats_requests: list[NumericStatsPlanRequest] = Field(default_factory=list)
+    categorical_stats_requests: list[CategoricalStatsPlanRequest] = Field(default_factory=list)
     text_response_requests: list[TextResponsePlanRequest] = Field(default_factory=list)
     reasoning: str = ""
 
