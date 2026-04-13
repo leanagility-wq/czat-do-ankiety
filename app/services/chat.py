@@ -21,6 +21,7 @@ from app.schemas import (
     GroundedAnswer,
     NumericStatsPlanRequest,
     OpenTopicPlanRequest,
+    QuestionMetadataPlanRequest,
     RetrievalPlan,
     TextResponsePlanRequest,
 )
@@ -40,6 +41,19 @@ RETRIEVAL_PLAN_SCHEMA = {
     "properties": {
         "is_in_scope": {"type": "boolean"},
         "reasoning": {"type": "string"},
+        "question_metadata_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "field_name": {"type": ["string", "null"]},
+                    "question_type": {"type": ["string", "null"]},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["field_name", "question_type", "limit"],
+            },
+        },
         "aggregate_requests": {
             "type": "array",
             "items": {
@@ -170,6 +184,7 @@ RETRIEVAL_PLAN_SCHEMA = {
     "required": [
         "is_in_scope",
         "reasoning",
+        "question_metadata_requests",
         "aggregate_requests",
         "correlation_requests",
         "open_topic_requests",
@@ -211,6 +226,7 @@ def build_planner_system_prompt() -> str:
         "Jeżeli użytkownik używa parafraz typu 'staż zawodowy', 'doświadczenie', 'najkrótszy staż', odnoś je do odpowiednich wymiarów i uporządkowanych wartości z katalogu. "
         "Jeżeli użytkownik pyta 'jak często używają narzędzi AI', traktuj to jako pytanie o pole lub metrykę związaną z ai_usage_frequency. "
         "Jeżeli pytanie wygląda na mieszczące się w ankiecie, nie oznaczaj go jako out of scope tylko dlatego, że nie używa dokładnych nazw z katalogu. "
+        "Dla pytań o to, jakie były pytania w ankiecie, jakie były skale, jakie były możliwe odpowiedzi albo co obejmował kwestionariusz, używaj question_metadata_requests. "
         "Dla pytań o zależności używaj correlations. "
         "Dla pytań o liczebności i gotowe agregaty używaj aggregates. "
         "Dla pytań o skale lub pola liczbowe z dodatkowymi filtrami używaj numeric_stats_requests. "
@@ -231,6 +247,7 @@ def build_recovery_planner_system_prompt() -> str:
         "Nie wymagaj dosłownego dopasowania słów. "
         "Przykład: 'staż zawodowy' może odnosić się do experience_group, jeśli to jedyny wymiar doświadczenia w katalogu. "
         "Przykład: 'jak często używają narzędzi AI' może odnosić się do ai_usage_frequency lub gotowych agregatów opartych o ai_usage_frequency. "
+        "Przykład: 'Jakie były pytania w ankiecie?' powinno użyć question_metadata_requests. "
         "Jeśli pytanie naprawdę wykracza poza ankietę, dopiero wtedy ustaw is_in_scope=false."
     )
 
@@ -245,6 +262,7 @@ def build_answer_system_prompt() -> str:
         "Przy pytaniach otwartych dawaj bogatszą odpowiedź: krótka synteza, 2-4 najważniejsze wnioski i cytaty, jeśli o nie proszono. "
         "Jeśli użytkownik prosi o cytat pełny albo najdłuższe wypowiedzi, używaj quote_full i nie skracaj cytatu bez potrzeby. "
         "Przy pytaniach o filtrowane skale, np. rola + doświadczenie, jasno nazwij oba filtry i podaj n oraz średnią, jeśli są dostępne. "
+        "Jeśli pytanie dotyczy pytań ankietowych lub struktury kwestionariusza, wypisz je czytelnie w punktach na podstawie question_metadata. "
         "Odpowiadaj po polsku, konkretnie, ale nie przesadnie krótko."
     )
 
@@ -294,6 +312,21 @@ def serialize_open_topic_rows(rows: list[OpenTopic]) -> list[dict]:
             "quote_short": row.quote_short,
             "quote_full": row.quote_full,
             "notes": row.notes,
+        }
+        for row in rows
+    ]
+
+
+def serialize_question_metadata_rows(rows: list[dict]) -> list[dict]:
+    return [
+        {
+            "field_name": row["field_name"],
+            "question_text": row["question_text"],
+            "question_type": row["question_type"],
+            "allowed_values": row.get("allowed_values", []),
+            "scale_min": row.get("scale_min"),
+            "scale_max": row.get("scale_max"),
+            "notes": row.get("notes"),
         }
         for row in rows
     ]
@@ -363,6 +396,9 @@ async def _plan_retrieval_with_prompt(question: str, catalog: dict, system_promp
 
 
 def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> RetrievalPlan:
+    question_metadata_rows = catalog["question_metadata"]
+    metadata_field_names = {item["field_name"] for item in question_metadata_rows}
+    metadata_question_types = {item["question_type"] for item in question_metadata_rows}
     aggregate_keys = {
         (
             item["metric_name"],
@@ -394,6 +430,13 @@ def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> Retrieval
     company_types = set(filter_dimensions["company_type"])
     company_sizes = set(filter_dimensions["company_size_group"])
     employment_statuses = set(filter_dimensions["employment_status"])
+
+    allowed_question_metadata = [
+        request
+        for request in plan.question_metadata_requests
+        if (request.field_name is None or request.field_name in metadata_field_names)
+        and (request.question_type is None or request.question_type in metadata_question_types)
+    ]
 
     allowed_aggregates = []
     for request in plan.aggregate_requests:
@@ -479,6 +522,7 @@ def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> Retrieval
     return RetrievalPlan(
         is_in_scope=plan.is_in_scope,
         reasoning=plan.reasoning,
+        question_metadata_requests=allowed_question_metadata,
         aggregate_requests=allowed_aggregates,
         correlation_requests=allowed_correlations,
         open_topic_requests=allowed_open_topics,
@@ -488,7 +532,23 @@ def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> Retrieval
     )
 
 
-async def execute_plan(session: AsyncSession, plan: RetrievalPlan) -> dict:
+async def execute_plan(session: AsyncSession, plan: RetrievalPlan, catalog: dict) -> dict:
+    question_metadata_context: list[dict] = []
+    for request in plan.question_metadata_requests:
+        rows = [
+            row
+            for row in catalog["question_metadata"]
+            if (request.field_name is None or row["field_name"] == request.field_name)
+            and (request.question_type is None or row["question_type"] == request.question_type)
+        ][: min(max(request.limit, 1), 50)]
+        if rows:
+            question_metadata_context.append(
+                {
+                    "request": request.model_dump(),
+                    "rows": serialize_question_metadata_rows(rows),
+                }
+            )
+
     aggregates_context: list[dict] = []
     for request in plan.aggregate_requests:
         rows = await fetch_aggregate_rows(
@@ -603,6 +663,7 @@ async def execute_plan(session: AsyncSession, plan: RetrievalPlan) -> dict:
             )
 
     return {
+        "question_metadata": question_metadata_context,
         "aggregates": aggregates_context,
         "correlations": correlations_context,
         "open_topics": open_topics_context,
@@ -639,6 +700,8 @@ async def answer_question(question: str, session: AsyncSession) -> ChatResponse:
         catalog = await fetch_catalog(session)
         plan = await plan_retrieval(question, catalog)
         if not plan.is_in_scope or (
+            not plan.question_metadata_requests
+            and
             not plan.aggregate_requests
             and not plan.correlation_requests
             and not plan.open_topic_requests
@@ -658,7 +721,7 @@ async def answer_question(question: str, session: AsyncSession) -> ChatResponse:
             )
 
         plan = filter_plan_against_catalog(plan, catalog)
-        context_payload = await execute_plan(session, plan)
+        context_payload = await execute_plan(session, plan, catalog)
 
         if not any(context_payload.values()):
             return ChatResponse(

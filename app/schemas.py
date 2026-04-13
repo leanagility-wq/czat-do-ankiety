@@ -77,8 +77,15 @@ class TextResponsePlanRequest(BaseModel):
     limit: int = 5
 
 
+class QuestionMetadataPlanRequest(BaseModel):
+    field_name: str | None = None
+    question_type: str | None = None
+    limit: int = 25
+
+
 class RetrievalPlan(BaseModel):
     is_in_scope: bool = True
+    question_metadata_requests: list[QuestionMetadataPlanRequest] = Field(default_factory=list)
     aggregate_requests: list[AggregatePlanRequest] = Field(default_factory=list)
     correlation_requests: list[CorrelationPlanRequest] = Field(default_factory=list)
     open_topic_requests: list[OpenTopicPlanRequest] = Field(default_factory=list)
