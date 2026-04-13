@@ -5,6 +5,46 @@ from app.models import Aggregate, Correlation, OpenTopic, QuestionMetadata, Resp
 
 
 NORMALIZATION_NOTES = {
+    "experience_group": {
+        "normalized_options": [
+            {"label": "Mniej niż rok", "source_variants": ["mniej niż rok", "<1", "poniżej roku"]},
+            {"label": "1-3 lata", "source_variants": ["1-3", "1 - 3"]},
+            {"label": "3-5 lat", "source_variants": ["3-5", "3 - 5"]},
+            {"label": "5-10 lat", "source_variants": ["5-10", "5 - 10"]},
+            {"label": "10+ lat", "source_variants": ["10+", "10 +", "powyżej 10"]},
+        ]
+    },
+    "company_size_group": {
+        "normalized_options": [
+            {"label": "1-50", "source_variants": ["1-10", "11-50", "1-50", "do 50"]},
+            {"label": "51-150", "source_variants": ["51-150", "50-150"]},
+            {"label": "150-500", "source_variants": ["150-500", "151-500"]},
+            {"label": "500+", "source_variants": ["500+", "powyżej 500", "500 i więcej"]},
+        ]
+    },
+    "company_type": {
+        "normalized_options": [
+            {
+                "label": "Software Product",
+                "source_variants": ["główny produkt", "saas", "sprzedajemy oprogramowanie"],
+            },
+            {
+                "label": "Software as Support Function",
+                "source_variants": ["wspierające działanie firmy", "wspiera działanie"],
+            },
+            {
+                "label": "Usługi / Consulting",
+                "source_variants": ["usługi", "consulting", "doradztwo", "klienci"],
+            },
+        ]
+    },
+    "employment_status": {
+        "normalized_options": [
+            {"label": "Pełny etat", "source_variants": ["pełnego etatu", "1fte", "uop", "pełny etat"]},
+            {"label": "Niepełny etat", "source_variants": ["niepełny etat"]},
+            {"label": "Nie pracuję", "source_variants": ["nie", "urlop macierzyński"]},
+        ]
+    },
     "ai_usage_frequency": {
         "normalized_options": [
             {
@@ -26,7 +66,75 @@ NORMALIZATION_NOTES = {
                 "source_variants": ["rzadziej niż raz w tygodniu", "nie korzystam"],
             },
         ]
-    }
+    },
+    "ai_tools_used": {
+        "normalized_options": [
+            {"label": "ChatGPT", "source_variants": ["chatgpt", "chat gpt"]},
+            {"label": "GitHub Copilot", "source_variants": ["copilot", "github copilot"]},
+            {"label": "Gemini", "source_variants": ["gemini"]},
+            {"label": "Claude", "source_variants": ["claude"]},
+            {"label": "Microsoft Teams", "source_variants": ["teams"]},
+            {"label": "Notion AI", "source_variants": ["notion"]},
+            {"label": "Jira AI", "source_variants": ["jira"]},
+            {"label": "Perplexity", "source_variants": ["perplexity"]},
+            {"label": "Midjourney", "source_variants": ["midjourney"]},
+        ]
+    },
+    "ai_effectiveness": {
+        "scale_mapping": {
+            "possible_label_mapping": {
+                "zdecydowanie nie": 1,
+                "raczej nie": 2,
+                "trudno powiedzieć": 3,
+                "raczej tak": 4,
+                "zdecydowanie tak": 5,
+            }
+        }
+    },
+    "ai_investment_level": {
+        "scale_mapping": {
+            "possible_label_mapping": {
+                "zdecydowanie nie": 1,
+                "raczej nie": 2,
+                "trudno powiedzieć": 3,
+                "raczej tak": 4,
+                "zdecydowanie tak": 5,
+            }
+        }
+    },
+    "ai_company_sentiment": {
+        "scale_mapping": {
+            "possible_label_mapping": {
+                "zdecydowanie nie": 1,
+                "raczej nie": 2,
+                "trudno powiedzieć": 3,
+                "raczej tak": 4,
+                "zdecydowanie tak": 5,
+            }
+        }
+    },
+    "role_confidence": {
+        "scale_mapping": {
+            "possible_label_mapping": {
+                "zdecydowanie nie": 1,
+                "raczej nie": 2,
+                "trudno powiedzieć": 3,
+                "raczej tak": 4,
+                "zdecydowanie tak": 5,
+            }
+        }
+    },
+    "ai_replacement_risk": {
+        "scale_mapping": {
+            "possible_label_mapping": {
+                "zdecydowanie nie": 1,
+                "raczej nie": 2,
+                "trudno powiedzieć": 3,
+                "raczej tak": 4,
+                "zdecydowanie tak": 5,
+            }
+        }
+    },
 }
 
 
