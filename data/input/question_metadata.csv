@@ -1,0 +1,5 @@
+question_code,question_text,question_type,description,allowed_operations
+ai_usage_frequency,Jak często używasz AI?,single_choice,Częstotliwość używania narzędzi AI,"counts,shares,cross_tabs"
+perceived_effectiveness,Czy AI zwiększa Twoją efektywność?,likert,Subiektywna ocena wpływu AI,"means,correlations,cross_tabs"
+open_concerns,Jakie obawy wiążesz z używaniem AI?,open_text,Otwarte odpowiedzi o obawach,"topics,quotes"
+investment_skills,W jakie kompetencje chcesz inwestować?,open_text,Otwarte odpowiedzi o rozwoju,"topics,quotes"

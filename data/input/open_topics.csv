@@ -1,0 +1,9 @@
+topic_key,topic_label,segment_key,segment_label,quote_text,quote_source,mention_count,sample_size
+top_concerns,Bezpieczeństwo danych,role:scrum_master,Scrum Masterzy,"Obawiam się, że poufne informacje mogą trafić do narzędzi zewnętrznych.",respondent_12,12,14
+top_concerns,Jakość odpowiedzi,role:scrum_master,Scrum Masterzy,"Największa obawa to zbyt pewne siebie, ale błędne odpowiedzi modeli.",respondent_07,9,14
+top_concerns,Utrata krytycznego myślenia,role:scrum_master,Scrum Masterzy,"Nie chcę, żeby zespół bezrefleksyjnie ufał sugestiom AI.",respondent_03,6,14
+top_concerns,Bezpieczeństwo danych,all,Wszyscy badani,"Martwi mnie, czy dane organizacji są bezpieczne.",respondent_12,18,48
+top_concerns,Jakość odpowiedzi,all,Wszyscy badani,"Modele bywają przekonujące, nawet gdy się mylą.",respondent_07,15,48
+investment_skills,Prompt engineering,all,Wszyscy badani,"Chcę lepiej formułować pytania i polecenia do modeli.",respondent_22,17,48
+investment_skills,Weryfikacja odpowiedzi AI,all,Wszyscy badani,"Najważniejsze jest sprawdzanie jakości i wiarygodności odpowiedzi.",respondent_31,14,48
+investment_skills,Automatyzacja pracy,all,Wszyscy badani,"Interesuje mnie łączenie AI z codziennymi procesami.",respondent_04,11,48

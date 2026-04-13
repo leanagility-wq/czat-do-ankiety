@@ -1,0 +1,7 @@
+respondent_id,role,question_code,question_text,answer_text,answer_numeric
+r1,Scrum Master,ai_usage_frequency,Jak często używasz AI?,codziennie,
+r1,Scrum Master,perceived_effectiveness,Czy AI zwiększa Twoją efektywność?,zdecydowanie tak,5
+r2,Product Owner,ai_usage_frequency,Jak często używasz AI?,kilka razy w tygodniu,
+r2,Product Owner,perceived_effectiveness,Czy AI zwiększa Twoją efektywność?,raczej tak,4
+r3,Developer,ai_usage_frequency,Jak często używasz AI?,sporadycznie,
+r3,Developer,perceived_effectiveness,Czy AI zwiększa Twoją efektywność?,trudno powiedzieć,3

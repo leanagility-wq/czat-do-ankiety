@@ -1,0 +1,7 @@
+metric_key,metric_label,segment_key,segment_label,answer_key,answer_label,value_numeric,value_text,sample_size
+ai_usage_frequency,Częstotliwość używania AI,all,Wszyscy badani,daily,Codziennie,42,,48
+ai_usage_frequency,Częstotliwość używania AI,all,Wszyscy badani,weekly,Kilka razy w tygodniu,35,,48
+ai_usage_frequency,Częstotliwość używania AI,all,Wszyscy badani,rarely,Sporadycznie,23,,48
+ai_usage_vs_effectiveness,Związek między częstszym używaniem AI a efektywnością,all,Wszyscy badani,high,Osoby używające AI codziennie deklarują wzrost efektywności,78,,48
+ai_usage_vs_effectiveness,Związek między częstszym używaniem AI a efektywnością,all,Wszyscy badani,mid,Osoby używające AI kilka razy w tygodniu deklarują wzrost efektywności,61,,48
+ai_usage_vs_effectiveness,Związek między częstszym używaniem AI a efektywnością,all,Wszyscy badani,low,Osoby używające AI sporadycznie deklarują wzrost efektywności,29,,48
