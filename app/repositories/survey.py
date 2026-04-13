@@ -97,9 +97,15 @@ async def fetch_catalog(session: AsyncSession) -> dict:
         "question_metadata": [
             {
                 "field_name": row.field_name,
+                "original_column_name": row.original_column_name,
                 "question_text": row.question_text,
                 "question_type": row.question_type,
-                "allowed_values": row.allowed_values,
+                "allowed_values": [
+                    item.strip()
+                    for item in (row.allowed_values or "").split("|")
+                    if item.strip()
+                ],
+                "notes": row.notes,
             }
             for row in metadata_rows
         ],
@@ -111,6 +117,31 @@ async def fetch_catalog(session: AsyncSession) -> dict:
         ],
         "role_groups": role_groups,
         "experience_groups": experience_groups,
+        "response_filter_dimensions": {
+            "role_group": role_groups,
+            "experience_group": experience_groups,
+            "company_type": [
+                item.strip()
+                for row in metadata_rows
+                if row.field_name == "company_type"
+                for item in (row.allowed_values or "").split("|")
+                if item.strip()
+            ],
+            "company_size_group": [
+                item.strip()
+                for row in metadata_rows
+                if row.field_name == "company_size_group"
+                for item in (row.allowed_values or "").split("|")
+                if item.strip()
+            ],
+            "employment_status": [
+                item.strip()
+                for row in metadata_rows
+                if row.field_name == "employment_status"
+                for item in (row.allowed_values or "").split("|")
+                if item.strip()
+            ],
+        },
         "aggregate_metrics": metric_names,
         "aggregate_segments": [
             {

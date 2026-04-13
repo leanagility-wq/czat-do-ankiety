@@ -178,14 +178,14 @@ def build_planner_system_prompt() -> str:
         "Możesz używać wyłącznie katalogu danych ankiety przekazanego w promptcie. "
         "Jeśli pytanie wykracza poza ankietę, ustaw is_in_scope=false. "
         "Nie wymyślaj nazw metryk, pól ani grup spoza katalogu. "
+        "Używaj nazw pól, filtrów i wartości dokładnie takich, jakie są w katalogu. "
         "Dla pytań o zależności używaj correlations. "
         "Dla pytań o liczebności i gotowe agregaty używaj aggregates. "
-        "Dla pytań o skale z dodatkowymi filtrami, np. rola + doświadczenie, używaj numeric_stats_requests. "
+        "Dla pytań o skale lub pola liczbowe z dodatkowymi filtrami używaj numeric_stats_requests. "
         "Dla pytań o pełne cytaty, najdłuższe wypowiedzi, przykłady odpowiedzi otwartych i selekcję tekstów używaj text_response_requests. "
         "Dla pytań o tematy, obawy, kompetencje i grupy tematów używaj open_topic_requests. "
-        "Interpretacja językowa: 'staż', 'doświadczenie', 'krótki staż', 'małe doświadczenie' odnoszą się do experience_group. "
-        "Jeśli użytkownik pyta o 'krótki staż', preferuj experience_group='1-3 lata', chyba że pytanie wyraźnie sugeruje brak doświadczenia. "
-        "Jeśli pytanie prosi o cytaty, zwłaszcza najdłuższe lub pełne, obowiązkowo dodaj text_response_requests."
+        "Jeśli pytanie prosi o cytaty lub pełne wypowiedzi, preferuj text_response_requests nad samym open_topic_requests. "
+        "Jeśli pytanie wymaga filtrowania, użyj response_filter_dimensions i allowed_values z katalogu."
     )
 
 
@@ -274,11 +274,25 @@ def compute_warning_from_context(context_payload: dict) -> str | None:
     return build_small_sample_warning(min(sample_sizes))
 
 
+def build_planner_catalog(catalog: dict) -> dict:
+    return {
+        "question_metadata": catalog["question_metadata"],
+        "response_filter_dimensions": catalog["response_filter_dimensions"],
+        "raw_numeric_fields": catalog["raw_numeric_fields"],
+        "raw_open_text_fields": catalog["raw_open_text_fields"],
+        "aggregate_metrics": catalog["aggregate_metrics"],
+        "aggregate_segments": catalog["aggregate_segments"],
+        "correlations": catalog["correlations"],
+        "open_topics": catalog["open_topics"],
+    }
+
+
 async def plan_retrieval(question: str, catalog: dict) -> RetrievalPlan:
+    planner_catalog = build_planner_catalog(catalog)
     user_prompt = (
         f"Pytanie użytkownika:\n{question}\n\n"
         "Dostępny katalog danych ankiety:\n"
-        f"{json.dumps(catalog, ensure_ascii=False, indent=2)}"
+        f"{json.dumps(planner_catalog, ensure_ascii=False, indent=2)}"
     )
     raw_plan = await openai_client.create_json_completion(
         system_prompt=build_planner_system_prompt(),
@@ -315,8 +329,12 @@ def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> Retrieval
     }
     raw_numeric_fields = set(catalog["raw_numeric_fields"])
     raw_open_text_fields = set(catalog["raw_open_text_fields"])
-    role_groups = set(catalog["role_groups"])
-    experience_groups = set(catalog["experience_groups"])
+    filter_dimensions = catalog["response_filter_dimensions"]
+    role_groups = set(filter_dimensions["role_group"])
+    experience_groups = set(filter_dimensions["experience_group"])
+    company_types = set(filter_dimensions["company_type"])
+    company_sizes = set(filter_dimensions["company_size_group"])
+    employment_statuses = set(filter_dimensions["employment_status"])
 
     allowed_aggregates = []
     for request in plan.aggregate_requests:
@@ -366,6 +384,9 @@ def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> Retrieval
         if request.field_name in raw_numeric_fields
         and is_allowed_filter(request.role_group, role_groups)
         and is_allowed_filter(request.experience_group, experience_groups)
+        and is_allowed_filter(request.company_type, company_types)
+        and is_allowed_filter(request.company_size_group, company_sizes)
+        and is_allowed_filter(request.employment_status, employment_statuses)
     ]
 
     allowed_text_responses = [
@@ -374,6 +395,9 @@ def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> Retrieval
         if request.field_name in raw_open_text_fields
         and is_allowed_filter(request.role_group, role_groups)
         and is_allowed_filter(request.experience_group, experience_groups)
+        and is_allowed_filter(request.company_type, company_types)
+        and is_allowed_filter(request.company_size_group, company_sizes)
+        and is_allowed_filter(request.employment_status, employment_statuses)
     ]
 
     return RetrievalPlan(
