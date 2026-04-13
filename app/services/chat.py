@@ -276,6 +276,7 @@ def build_answer_system_prompt() -> str:
         "Jeśli pytanie dotyczy pytań ankietowych lub struktury kwestionariusza, wypisz je czytelnie w punktach na podstawie question_metadata. "
         "Jeśli pytanie dotyczy skal, pokaż zakres skali przy każdym pytaniu, jeśli jest dostępny. "
         "Jeśli pytanie dotyczy możliwych odpowiedzi, wypisz allowed_values jako listę punktowaną. "
+        "Jeśli question_metadata zawiera normalization_notes, pokaż również ważne warianty źródłowe, które zostały znormalizowane do danej odpowiedzi. "
         "Jeśli pytanie dotyczy tylko pytań otwartych albo tylko pytań zamkniętych, nie mieszaj innych typów. "
         "Formatuj odpowiedzi czytelnie. "
         "Jeśli odpowiedź zawiera więcej niż jedną istotną informację, użyj krótkiego zdania wprowadzającego, pustej linii i listy punktowanej. "
@@ -370,6 +371,7 @@ def serialize_question_metadata_rows(rows: list[dict]) -> list[dict]:
             "scale_min": row.get("scale_min"),
             "scale_max": row.get("scale_max"),
             "notes": row.get("notes"),
+            "normalization_notes": row.get("normalization_notes"),
         }
         for row in rows
     ]

@@ -4,6 +4,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Aggregate, Correlation, OpenTopic, QuestionMetadata, Response
 
 
+NORMALIZATION_NOTES = {
+    "ai_usage_frequency": {
+        "normalized_options": [
+            {
+                "label": "Codziennie",
+                "source_variants": [
+                    "codziennie",
+                    "kilka razy dziennie",
+                    "wiele razy dziennie",
+                    "raz dziennie",
+                    "wielokrotnie w ciągu dnia",
+                ],
+            },
+            {
+                "label": "Raz na kilka dni",
+                "source_variants": ["raz na kilka dni", "kilka razy w tygodniu"],
+            },
+            {
+                "label": "Rzadziej niż raz w tygodniu",
+                "source_variants": ["rzadziej niż raz w tygodniu", "nie korzystam"],
+            },
+        ]
+    }
+}
+
+
 async def fetch_question_metadata(session: AsyncSession) -> list[QuestionMetadata]:
     result = await session.execute(
         select(QuestionMetadata).order_by(QuestionMetadata.field_name.asc())
@@ -106,6 +132,7 @@ async def fetch_catalog(session: AsyncSession) -> dict:
                     if item.strip()
                 ],
                 "notes": row.notes,
+                "normalization_notes": NORMALIZATION_NOTES.get(row.field_name),
             }
             for row in metadata_rows
         ],
