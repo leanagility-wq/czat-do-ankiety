@@ -227,6 +227,10 @@ def build_planner_system_prompt() -> str:
         "Jeżeli użytkownik pyta 'jak często używają narzędzi AI', traktuj to jako pytanie o pole lub metrykę związaną z ai_usage_frequency. "
         "Jeżeli pytanie wygląda na mieszczące się w ankiecie, nie oznaczaj go jako out of scope tylko dlatego, że nie używa dokładnych nazw z katalogu. "
         "Dla pytań o to, jakie były pytania w ankiecie, jakie były skale, jakie były możliwe odpowiedzi albo co obejmował kwestionariusz, używaj question_metadata_requests. "
+        "Jeśli użytkownik pyta o pytania otwarte, użyj question_metadata_requests z question_type='open_text'. "
+        "Jeśli użytkownik pyta o skale w ankiecie, użyj question_metadata_requests z question_type='scale'. "
+        "Jeśli użytkownik pyta o możliwe odpowiedzi, warianty odpowiedzi, kafeterię albo opcje wyboru dla konkretnego pytania, użyj question_metadata_requests dla najlepiej pasującego field_name. "
+        "Jeśli użytkownik pyta o pytania zamknięte, zwykle chodzi o question_type='single_choice' lub question_type='multi_choice'. "
         "Dla pytań o zależności używaj correlations. "
         "Dla pytań o liczebności i gotowe agregaty używaj aggregates. "
         "Dla pytań o skale lub pola liczbowe z dodatkowymi filtrami używaj numeric_stats_requests. "
@@ -248,6 +252,9 @@ def build_recovery_planner_system_prompt() -> str:
         "Przykład: 'staż zawodowy' może odnosić się do experience_group, jeśli to jedyny wymiar doświadczenia w katalogu. "
         "Przykład: 'jak często używają narzędzi AI' może odnosić się do ai_usage_frequency lub gotowych agregatów opartych o ai_usage_frequency. "
         "Przykład: 'Jakie były pytania w ankiecie?' powinno użyć question_metadata_requests. "
+        "Przykład: 'Jakie były pytania otwarte?' powinno użyć question_metadata_requests z question_type='open_text'. "
+        "Przykład: 'Jakie skale były w ankiecie?' powinno użyć question_metadata_requests z question_type='scale'. "
+        "Przykład: 'Jakie odpowiedzi były możliwe przy pytaniu o częstotliwość używania AI?' powinno użyć question_metadata_requests dla pola ai_usage_frequency. "
         "Jeśli pytanie naprawdę wykracza poza ankietę, dopiero wtedy ustaw is_in_scope=false."
     )
 
@@ -263,6 +270,9 @@ def build_answer_system_prompt() -> str:
         "Jeśli użytkownik prosi o cytat pełny albo najdłuższe wypowiedzi, używaj quote_full i nie skracaj cytatu bez potrzeby. "
         "Przy pytaniach o filtrowane skale, np. rola + doświadczenie, jasno nazwij oba filtry i podaj n oraz średnią, jeśli są dostępne. "
         "Jeśli pytanie dotyczy pytań ankietowych lub struktury kwestionariusza, wypisz je czytelnie w punktach na podstawie question_metadata. "
+        "Jeśli pytanie dotyczy skal, pokaż zakres skali przy każdym pytaniu, jeśli jest dostępny. "
+        "Jeśli pytanie dotyczy możliwych odpowiedzi, wypisz allowed_values jako listę punktowaną. "
+        "Jeśli pytanie dotyczy tylko pytań otwartych albo tylko pytań zamkniętych, nie mieszaj innych typów. "
         "Odpowiadaj po polsku, konkretnie, ale nie przesadnie krótko."
     )
 

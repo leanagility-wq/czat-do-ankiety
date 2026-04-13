@@ -31,6 +31,8 @@ EXAMPLE_QUESTIONS = [
     "Jakie obawy najczęściej zgłaszali Scrum Masterzy?",
     "Czy częstsze używanie AI wiąże się z większą efektywnością?",
     "W jakie kompetencje badani chcą inwestować?",
+    "Jakie były pytania otwarte?",
+    "Jakie odpowiedzi były możliwe przy pytaniu o częstotliwość używania AI?",
 ]
 
 
