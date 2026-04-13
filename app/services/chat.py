@@ -1,4 +1,5 @@
 import json
+import re
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -273,8 +274,37 @@ def build_answer_system_prompt() -> str:
         "Jeśli pytanie dotyczy skal, pokaż zakres skali przy każdym pytaniu, jeśli jest dostępny. "
         "Jeśli pytanie dotyczy możliwych odpowiedzi, wypisz allowed_values jako listę punktowaną. "
         "Jeśli pytanie dotyczy tylko pytań otwartych albo tylko pytań zamkniętych, nie mieszaj innych typów. "
+        "Formatuj odpowiedzi czytelnie. "
+        "Jeśli odpowiedź zawiera więcej niż jedną istotną informację, użyj krótkiego zdania wprowadzającego, pustej linii i listy punktowanej. "
+        "Jeśli porównujesz kilka wyników, każdy wynik podaj w osobnym punkcie. "
+        "Jeśli cytujesz, każdy cytat umieść w osobnym wierszu poprzedzonym znakiem >. "
+        "Unikaj ściany tekstu i długich bloków bez podziału na linie. "
         "Odpowiadaj po polsku, konkretnie, ale nie przesadnie krótko."
     )
+
+
+def format_answer_text(answer: str) -> str:
+    text = (answer or "").strip()
+    if not text:
+        return text
+
+    if "\n" in text or text.startswith("- ") or text.startswith("> "):
+        return text
+
+    sentence_breaks = re.split(r"(?<=[.!?])\s+(?=[A-ZĄĆĘŁŃÓŚŹŻ])", text)
+    if len(sentence_breaks) >= 3:
+        lead = sentence_breaks[0].strip()
+        bullets = [item.strip() for item in sentence_breaks[1:] if item.strip()]
+        if bullets:
+            return lead + "\n\n" + "\n".join(f"- {item}" for item in bullets)
+
+    clause_breaks = [item.strip() for item in text.split(";") if item.strip()]
+    if len(clause_breaks) >= 3:
+        lead = clause_breaks[0]
+        bullets = clause_breaks[1:]
+        return lead + "\n\n" + "\n".join(f"- {item}" for item in bullets)
+
+    return text
 
 
 def serialize_aggregate_rows(rows: list[Aggregate]) -> list[dict]:
@@ -749,7 +779,7 @@ async def answer_question(question: str, session: AsyncSession) -> ChatResponse:
             )
 
         return ChatResponse(
-            answer=grounded.answer,
+            answer=format_answer_text(grounded.answer),
             answer_type="llm",
             source="openai+survey_data",
             warning=compute_warning_from_context(context_payload),
