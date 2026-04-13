@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 import psycopg
+from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -53,9 +54,10 @@ def import_csv_file(connection: psycopg.Connection, table_name: str, path: Path)
 
 
 def main() -> None:
+    load_dotenv(BASE_DIR / ".env")
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        raise RuntimeError("Ustaw zmienną środowiskową DATABASE_URL.")
+        raise RuntimeError("Ustaw DATABASE_URL w systemie albo w pliku .env.")
 
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     connection_url = normalize_database_url(database_url)
@@ -69,7 +71,7 @@ def main() -> None:
             import_csv_file(connection, table_name, path)
 
         connection.commit()
-        print("Import zakończony powodzeniem.")
+        print("Import zakonczony powodzeniem.")
 
 
 if __name__ == "__main__":
