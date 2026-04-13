@@ -38,6 +38,20 @@ class Settings(BaseSettings):
             return False
         return False
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value):
+        if value is None:
+            return value
+        database_url = str(value).strip()
+        if database_url.startswith("postgresql+asyncpg://"):
+            return database_url
+        if database_url.startswith("postgres://"):
+            return "postgresql+asyncpg://" + database_url.split("://", 1)[1]
+        if database_url.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + database_url.split("://", 1)[1]
+        return database_url
+
 
 @lru_cache
 def get_settings() -> Settings:
