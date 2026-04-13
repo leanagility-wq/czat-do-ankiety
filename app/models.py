@@ -42,6 +42,7 @@ class QuestionMetadata(Base):
     scale_max: Mapped[float | None] = mapped_column(Float)
     allowed_values: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
+    normalization_notes: Mapped[str | None] = mapped_column(Text)
 
 
 class Aggregate(Base):

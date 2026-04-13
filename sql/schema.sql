@@ -35,8 +35,12 @@ CREATE TABLE IF NOT EXISTS question_metadata (
     scale_min DOUBLE PRECISION NULL,
     scale_max DOUBLE PRECISION NULL,
     allowed_values TEXT NULL,
-    notes TEXT NULL
+    notes TEXT NULL,
+    normalization_notes TEXT NULL
 );
+
+ALTER TABLE question_metadata
+ADD COLUMN IF NOT EXISTS normalization_notes TEXT NULL;
 
 CREATE TABLE IF NOT EXISTS aggregates (
     id BIGSERIAL PRIMARY KEY,
