@@ -152,6 +152,35 @@ button {
   line-height: 1.55;
 }
 
+.formatted-content {
+  display: grid;
+  gap: 10px;
+}
+
+.formatted-paragraph {
+  margin: 0;
+}
+
+.formatted-list {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+}
+
+.formatted-list li::marker {
+  color: var(--accent-dark);
+}
+
+.formatted-quote {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 4px solid rgba(197, 106, 45, 0.45);
+  background: rgba(197, 106, 45, 0.07);
+  border-radius: 0 14px 14px 0;
+  color: #3c3129;
+}
+
 .message-meta {
   margin-top: 10px;
   color: var(--muted);

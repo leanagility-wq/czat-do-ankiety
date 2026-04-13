@@ -19,10 +19,10 @@ def render_index_html(examples: list[str]) -> HTMLResponse:
     <main class="shell">
       <section class="hero">
         <p class="eyebrow">Analiza ankiety</p>
-        <h1>Chatbot odpowiadający wyłącznie na podstawie wyników badania</h1>
+        <h1>Chatbot odpowiadaj&#261;cy wy&#322;&#261;cznie na podstawie wynik&oacute;w badania</h1>
         <p class="intro">
-          Zadaj pytanie o liczby, przekroje, zależności albo odpowiedzi otwarte.
-          Jeśli ankieta czegoś nie obejmuje, aplikacja odmówi lub zwróci brak danych.
+          Zadaj pytanie o liczby, przekroje, zale&#380;no&#347;ci albo odpowiedzi otwarte.
+          Je&#347;li ankieta czego&#347; nie obejmuje, aplikacja odm&oacute;wi lub zwr&oacute;ci brak danych.
         </p>
       </section>
 
@@ -35,7 +35,7 @@ def render_index_html(examples: list[str]) -> HTMLResponse:
               name="question"
               type="text"
               maxlength="500"
-              placeholder="Np. Czy częstsze używanie AI wiąże się z większą efektywnością?"
+              placeholder="Np. Czy cz&#281;stsze u&#380;ywanie AI wi&#261;&#380;e si&#281; z wi&#281;ksz&#261; efektywno&#347;ci&#261;?"
               required
             />
             <button type="submit">Zapytaj</button>
@@ -43,7 +43,7 @@ def render_index_html(examples: list[str]) -> HTMLResponse:
         </form>
 
         <div class="examples">
-          <h2>Przykładowe pytania</h2>
+          <h2>Przyk&#322;adowe pytania</h2>
           <div class="example-list">{examples_html}</div>
         </div>
 
