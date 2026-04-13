@@ -13,6 +13,7 @@ from app.repositories.survey import (
     fetch_correlation_row,
     fetch_numeric_summary,
     fetch_open_topics,
+    fetch_open_topic_summary,
     fetch_text_responses,
 )
 from app.schemas import (
@@ -268,6 +269,8 @@ def build_answer_system_prompt() -> str:
         f'"{NO_DATA_MESSAGE}". '
         "Jeśli w kontekście widać małą próbę, uwzględnij to w odpowiedzi zwięźle i ostrożnie. "
         "Przy pytaniach otwartych dawaj bogatszą odpowiedź: krótka synteza, 2-4 najważniejsze wnioski i cytaty, jeśli o nie proszono. "
+        "Jeśli w kontekście jest open_topic_summary, oprzyj syntezę przede wszystkim na nim i jasno komunikuj, ilu odpowiedzi dotyczy synteza. "
+        "Jeśli open_topic_summary zawiera total_responses, nie sugeruj, że synteza opiera się tylko na kilku przykładach, chyba że użytkownik wyraźnie poprosił wyłącznie o przykładowe cytaty. "
         "Jeśli użytkownik prosi o cytat pełny albo najdłuższe wypowiedzi, używaj quote_full i nie skracaj cytatu bez potrzeby. "
         "Przy pytaniach o filtrowane skale, np. rola + doświadczenie, jasno nazwij oba filtry i podaj n oraz średnią, jeśli są dostępne. "
         "Jeśli pytanie dotyczy pytań ankietowych lub struktury kwestionariusza, wypisz je czytelnie w punktach na podstawie question_metadata. "
@@ -374,6 +377,9 @@ def serialize_question_metadata_rows(rows: list[dict]) -> list[dict]:
 
 def compute_warning_from_context(context_payload: dict) -> str | None:
     sample_sizes: list[int] = []
+    for item in context_payload["open_topic_summaries"]:
+        if isinstance(item.get("summary", {}).get("total_responses"), int):
+            sample_sizes.append(item["summary"]["total_responses"])
     for item in context_payload["aggregates"]:
         for row in item["rows"]:
             if isinstance(row.get("n"), int):
@@ -589,6 +595,23 @@ async def execute_plan(session: AsyncSession, plan: RetrievalPlan, catalog: dict
                 }
             )
 
+    open_topic_summaries_context: list[dict] = []
+    for request in plan.open_topic_requests:
+        summary = await fetch_open_topic_summary(
+            session,
+            question_field=request.question_field,
+            role_group=request.role_group,
+            experience_group=request.experience_group,
+            limit=12,
+        )
+        if summary is not None:
+            open_topic_summaries_context.append(
+                {
+                    "request": request.model_dump(),
+                    "summary": summary,
+                }
+            )
+
     aggregates_context: list[dict] = []
     for request in plan.aggregate_requests:
         rows = await fetch_aggregate_rows(
@@ -632,7 +655,7 @@ async def execute_plan(session: AsyncSession, plan: RetrievalPlan, catalog: dict
             role_group=request.role_group,
             experience_group=request.experience_group,
             topic_name=request.topic_name,
-            limit=min(max(request.limit, 1), 12),
+            limit=max(min(max(request.limit, 1), 30), 20),
         )
         if rows:
             open_topics_context.append(
@@ -704,6 +727,7 @@ async def execute_plan(session: AsyncSession, plan: RetrievalPlan, catalog: dict
 
     return {
         "question_metadata": question_metadata_context,
+        "open_topic_summaries": open_topic_summaries_context,
         "aggregates": aggregates_context,
         "correlations": correlations_context,
         "open_topics": open_topics_context,

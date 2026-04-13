@@ -267,6 +267,77 @@ async def fetch_open_topics(
     return list(result.scalars())
 
 
+async def fetch_open_topic_summary(
+    session: AsyncSession,
+    *,
+    question_field: str,
+    role_group: str | None = None,
+    experience_group: str | None = None,
+    limit: int = 12,
+) -> dict | None:
+    query = select(OpenTopic).where(OpenTopic.question_field == question_field)
+    if role_group is not None:
+        query = query.where(OpenTopic.role_group == role_group)
+    if experience_group is not None:
+        query = query.where(OpenTopic.experience_group == experience_group)
+
+    total_rows = await session.execute(
+        select(func.count(OpenTopic.id)).where(
+            OpenTopic.question_field == question_field,
+            *( [OpenTopic.role_group == role_group] if role_group is not None else [] ),
+            *( [OpenTopic.experience_group == experience_group] if experience_group is not None else [] ),
+        )
+    )
+    total_topic_rows = int(total_rows.scalar_one() or 0)
+    if not total_topic_rows:
+        return None
+
+    total_responses_query = select(func.count(func.distinct(OpenTopic.response_id))).where(
+        OpenTopic.question_field == question_field
+    )
+    if role_group is not None:
+        total_responses_query = total_responses_query.where(OpenTopic.role_group == role_group)
+    if experience_group is not None:
+        total_responses_query = total_responses_query.where(OpenTopic.experience_group == experience_group)
+
+    topic_counts_query = (
+        select(
+            OpenTopic.topic_name,
+            OpenTopic.topic_group,
+            func.count(OpenTopic.id).label("topic_count"),
+            func.count(func.distinct(OpenTopic.response_id)).label("response_count"),
+        )
+        .where(OpenTopic.question_field == question_field)
+        .group_by(OpenTopic.topic_name, OpenTopic.topic_group)
+        .order_by(func.count(func.distinct(OpenTopic.response_id)).desc(), OpenTopic.topic_name.asc())
+        .limit(limit)
+    )
+    if role_group is not None:
+        topic_counts_query = topic_counts_query.where(OpenTopic.role_group == role_group)
+    if experience_group is not None:
+        topic_counts_query = topic_counts_query.where(OpenTopic.experience_group == experience_group)
+
+    total_responses = int((await session.execute(total_responses_query)).scalar_one() or 0)
+    topic_rows = (await session.execute(topic_counts_query)).all()
+
+    return {
+        "question_field": question_field,
+        "role_group": role_group,
+        "experience_group": experience_group,
+        "total_topic_rows": total_topic_rows,
+        "total_responses": total_responses,
+        "top_topics": [
+            {
+                "topic_name": topic_name,
+                "topic_group": topic_group,
+                "topic_count": int(topic_count),
+                "response_count": int(response_count),
+            }
+            for topic_name, topic_group, topic_count, response_count in topic_rows
+        ],
+    }
+
+
 def _apply_response_filters(
     query,
     *,
