@@ -1,16 +1,166 @@
+import json
+
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.repositories.survey import fetch_aggregate_rows, fetch_open_topics
-from app.schemas import ChatResponse
-from app.services.query_router import route_question
+from app.models import Aggregate, Correlation, OpenTopic
+from app.repositories.survey import (
+    fetch_aggregate_rows,
+    fetch_catalog,
+    fetch_correlation_row,
+    fetch_numeric_summary,
+    fetch_open_topics,
+    fetch_text_responses,
+)
+from app.schemas import (
+    ChatResponse,
+    CorrelationPlanRequest,
+    GroundedAnswer,
+    NumericStatsPlanRequest,
+    OpenTopicPlanRequest,
+    RetrievalPlan,
+    TextResponsePlanRequest,
+)
+from app.services.openai_client import OpenAIClient
 
 
 NO_DATA_MESSAGE = "Tego nie da się stwierdzić na podstawie tej ankiety."
-REFUSAL_MESSAGE = (
-    "Mogę odpowiadać wyłącznie na podstawie danych z tej ankiety."
-)
+REFUSAL_MESSAGE = "Mogę odpowiadać wyłącznie na podstawie danych z tej ankiety."
+CONFIG_MESSAGE = "Aplikacja nie ma jeszcze skonfigurowanego OPENAI_API_KEY."
 settings = get_settings()
+openai_client = OpenAIClient()
+
+
+RETRIEVAL_PLAN_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "is_in_scope": {"type": "boolean"},
+        "reasoning": {"type": "string"},
+        "aggregate_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "metric_name": {"type": "string"},
+                    "segment_type": {"type": ["string", "null"]},
+                    "segment_value": {"type": ["string", "null"]},
+                    "subsegment_type": {"type": ["string", "null"]},
+                    "subsegment_value": {"type": ["string", "null"]},
+                    "limit": {"type": "integer"},
+                },
+                "required": [
+                    "metric_name",
+                    "segment_type",
+                    "segment_value",
+                    "subsegment_type",
+                    "subsegment_value",
+                    "limit",
+                ],
+            },
+        },
+        "correlation_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "x_metric": {"type": "string"},
+                    "y_metric": {"type": "string"},
+                    "group_name": {"type": "string"},
+                },
+                "required": ["x_metric", "y_metric", "group_name"],
+            },
+        },
+        "open_topic_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "question_field": {"type": "string"},
+                    "role_group": {"type": ["string", "null"]},
+                    "experience_group": {"type": ["string", "null"]},
+                    "topic_name": {"type": ["string", "null"]},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["question_field", "role_group", "experience_group", "topic_name", "limit"],
+            },
+        },
+        "numeric_stats_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "field_name": {"type": "string"},
+                    "role_group": {"type": ["string", "null"]},
+                    "experience_group": {"type": ["string", "null"]},
+                    "company_type": {"type": ["string", "null"]},
+                    "company_size_group": {"type": ["string", "null"]},
+                    "employment_status": {"type": ["string", "null"]},
+                },
+                "required": [
+                    "field_name",
+                    "role_group",
+                    "experience_group",
+                    "company_type",
+                    "company_size_group",
+                    "employment_status",
+                ],
+            },
+        },
+        "text_response_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "field_name": {"type": "string"},
+                    "role_group": {"type": ["string", "null"]},
+                    "experience_group": {"type": ["string", "null"]},
+                    "company_type": {"type": ["string", "null"]},
+                    "company_size_group": {"type": ["string", "null"]},
+                    "employment_status": {"type": ["string", "null"]},
+                    "sort_by": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": [
+                    "field_name",
+                    "role_group",
+                    "experience_group",
+                    "company_type",
+                    "company_size_group",
+                    "employment_status",
+                    "sort_by",
+                    "limit",
+                ],
+            },
+        },
+    },
+    "required": [
+        "is_in_scope",
+        "reasoning",
+        "aggregate_requests",
+        "correlation_requests",
+        "open_topic_requests",
+        "numeric_stats_requests",
+        "text_response_requests",
+    ],
+}
+
+GROUNDED_ANSWER_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "answer": {"type": "string"},
+        "insufficient_data": {"type": "boolean"},
+        "cites_small_sample": {"type": "boolean"},
+    },
+    "required": ["answer", "insufficient_data", "cites_small_sample"],
+}
 
 
 def build_small_sample_warning(sample_size: int | None) -> str | None:
@@ -21,84 +171,386 @@ def build_small_sample_warning(sample_size: int | None) -> str | None:
     return None
 
 
-def render_aggregate_answer(metric_label: str, rows: list) -> str:
-    if not rows:
-        return NO_DATA_MESSAGE
-
-    fragments: list[str] = []
-    for row in rows[:4]:
-        value = row.value_text
-        if value is None and row.value_numeric is not None:
-            value = f"{row.value_numeric:g}"
-        fragments.append(f"{row.answer_label}: {value}")
-    return f"{metric_label}: " + "; ".join(fragments) + "."
-
-
-def render_open_topics_answer(segment_label: str, rows: list) -> str:
-    if not rows:
-        return NO_DATA_MESSAGE
-
-    topics = ", ".join(
-        f"{row.topic_label} ({row.mention_count})"
-        for row in rows[:3]
+def build_planner_system_prompt() -> str:
+    return (
+        "Jesteś plannerem pobrania danych do chatbota ankietowego. "
+        "Twoim zadaniem NIE jest odpowiadać na pytanie. Masz zwrócić tylko plan pobrania danych w JSON. "
+        "Możesz używać wyłącznie katalogu danych ankiety przekazanego w promptcie. "
+        "Jeśli pytanie wykracza poza ankietę, ustaw is_in_scope=false. "
+        "Nie wymyślaj nazw metryk, pól ani grup spoza katalogu. "
+        "Dla pytań o zależności używaj correlations. "
+        "Dla pytań o liczebności i gotowe agregaty używaj aggregates. "
+        "Dla pytań o skale z dodatkowymi filtrami, np. rola + doświadczenie, używaj numeric_stats_requests. "
+        "Dla pytań o pełne cytaty, najdłuższe wypowiedzi, przykłady odpowiedzi otwartych i selekcję tekstów używaj text_response_requests. "
+        "Dla pytań o tematy, obawy, kompetencje i grupy tematów używaj open_topic_requests. "
+        "Interpretacja językowa: 'staż', 'doświadczenie', 'krótki staż', 'małe doświadczenie' odnoszą się do experience_group. "
+        "Jeśli użytkownik pyta o 'krótki staż', preferuj experience_group='1-3 lata', chyba że pytanie wyraźnie sugeruje brak doświadczenia. "
+        "Jeśli pytanie prosi o cytaty, zwłaszcza najdłuższe lub pełne, obowiązkowo dodaj text_response_requests."
     )
 
-    lead = f"Najczęściej wskazywane tematy dla grupy {segment_label}: {topics}."
-    quote = next((row.quote_text for row in rows if row.quote_text), None)
-    if quote:
-        return f'{lead} Przykładowy cytat: "{quote}"'
-    return lead
+
+def build_answer_system_prompt() -> str:
+    return (
+        "Jesteś analitykiem ankiety. Odpowiadasz wyłącznie na podstawie przekazanego kontekstu z danych ankiety. "
+        "Nie wolno Ci dodawać żadnych faktów spoza kontekstu. "
+        "Jeśli kontekst nie wystarcza do odpowiedzi, ustaw insufficient_data=true i zwróć dokładnie: "
+        f'"{NO_DATA_MESSAGE}". '
+        "Jeśli w kontekście widać małą próbę, uwzględnij to w odpowiedzi zwięźle i ostrożnie. "
+        "Przy pytaniach otwartych dawaj bogatszą odpowiedź: krótka synteza, 2-4 najważniejsze wnioski i cytaty, jeśli o nie proszono. "
+        "Jeśli użytkownik prosi o cytat pełny albo najdłuższe wypowiedzi, używaj quote_full i nie skracaj cytatu bez potrzeby. "
+        "Przy pytaniach o filtrowane skale, np. rola + doświadczenie, jasno nazwij oba filtry i podaj n oraz średnią, jeśli są dostępne. "
+        "Odpowiadaj po polsku, konkretnie, ale nie przesadnie krótko."
+    )
+
+
+def serialize_aggregate_rows(rows: list[Aggregate]) -> list[dict]:
+    return [
+        {
+            "metric_name": row.metric_name,
+            "segment_type": row.segment_type,
+            "segment_value": row.segment_value,
+            "subsegment_type": row.subsegment_type,
+            "subsegment_value": row.subsegment_value,
+            "value": row.value,
+            "value_type": row.value_type,
+            "n": row.n,
+            "small_sample_warning": row.small_sample_warning,
+            "notes": row.notes,
+        }
+        for row in rows
+    ]
+
+
+def serialize_correlation_row(row: Correlation) -> dict:
+    return {
+        "x_metric": row.x_metric,
+        "y_metric": row.y_metric,
+        "group_name": row.group_name,
+        "correlation_type": row.correlation_type,
+        "correlation_value": row.correlation_value,
+        "p_value": row.p_value,
+        "is_significant": row.is_significant,
+        "plain_language_summary": row.plain_language_summary,
+        "n": row.n,
+        "notes": row.notes,
+    }
+
+
+def serialize_open_topic_rows(rows: list[OpenTopic]) -> list[dict]:
+    return [
+        {
+            "response_id": row.response_id,
+            "question_field": row.question_field,
+            "role_group": row.role_group,
+            "experience_group": row.experience_group,
+            "topic_name": row.topic_name,
+            "topic_group": row.topic_group,
+            "quote_short": row.quote_short,
+            "quote_full": row.quote_full,
+            "notes": row.notes,
+        }
+        for row in rows
+    ]
+
+
+def compute_warning_from_context(context_payload: dict) -> str | None:
+    sample_sizes: list[int] = []
+    for item in context_payload["aggregates"]:
+        for row in item["rows"]:
+            if isinstance(row.get("n"), int):
+                sample_sizes.append(row["n"])
+    for item in context_payload["correlations"]:
+        if isinstance(item["row"].get("n"), int):
+            sample_sizes.append(item["row"]["n"])
+    for item in context_payload["open_topics"]:
+        sample_sizes.append(len({row["response_id"] for row in item["rows"]}))
+    for item in context_payload["numeric_stats"]:
+        if isinstance(item["row"].get("n"), int):
+            sample_sizes.append(item["row"]["n"])
+    for item in context_payload["text_responses"]:
+        sample_sizes.append(len({row["response_id"] for row in item["rows"]}))
+    if not sample_sizes:
+        return None
+    return build_small_sample_warning(min(sample_sizes))
+
+
+async def plan_retrieval(question: str, catalog: dict) -> RetrievalPlan:
+    user_prompt = (
+        f"Pytanie użytkownika:\n{question}\n\n"
+        "Dostępny katalog danych ankiety:\n"
+        f"{json.dumps(catalog, ensure_ascii=False, indent=2)}"
+    )
+    raw_plan = await openai_client.create_json_completion(
+        system_prompt=build_planner_system_prompt(),
+        user_prompt=user_prompt,
+        schema_name="retrieval_plan",
+        schema=RETRIEVAL_PLAN_SCHEMA,
+    )
+    return RetrievalPlan.model_validate(raw_plan)
+
+
+def filter_plan_against_catalog(plan: RetrievalPlan, catalog: dict) -> RetrievalPlan:
+    aggregate_keys = {
+        (
+            item["metric_name"],
+            item["segment_type"],
+            item["segment_value"],
+            item["subsegment_type"],
+            item["subsegment_value"],
+        )
+        for item in catalog["aggregate_segments"]
+    }
+    correlation_keys = {
+        (item["x_metric"], item["y_metric"], item["group_name"])
+        for item in catalog["correlations"]
+    }
+    open_topic_keys = {
+        (
+            item["question_field"],
+            item["role_group"],
+            item["experience_group"],
+            item["topic_name"],
+        )
+        for item in catalog["open_topics"]
+    }
+    raw_numeric_fields = set(catalog["raw_numeric_fields"])
+    raw_open_text_fields = set(catalog["raw_open_text_fields"])
+    role_groups = set(catalog["role_groups"])
+    experience_groups = set(catalog["experience_groups"])
+
+    allowed_aggregates = []
+    for request in plan.aggregate_requests:
+        lookup = (
+            request.metric_name,
+            request.segment_type,
+            request.segment_value,
+            request.subsegment_type,
+            request.subsegment_value,
+        )
+        wildcard_lookup = (
+            request.metric_name,
+            request.segment_type,
+            request.segment_value,
+            None,
+            None,
+        )
+        metric_only = (request.metric_name, None, None, None, None)
+        if lookup in aggregate_keys or wildcard_lookup in aggregate_keys or metric_only in aggregate_keys:
+            allowed_aggregates.append(request)
+
+    allowed_correlations = [
+        request
+        for request in plan.correlation_requests
+        if (request.x_metric, request.y_metric, request.group_name) in correlation_keys
+    ]
+
+    allowed_open_topics = []
+    for request in plan.open_topic_requests:
+        matches = [
+            key
+            for key in open_topic_keys
+            if key[0] == request.question_field
+            and (request.role_group is None or key[1] == request.role_group)
+            and (request.experience_group is None or key[2] == request.experience_group)
+            and (request.topic_name is None or key[3] == request.topic_name)
+        ]
+        if matches:
+            allowed_open_topics.append(request)
+
+    def is_allowed_filter(value: str | None, allowed_values: set[str]) -> bool:
+        return value is None or value in allowed_values
+
+    allowed_numeric_stats = [
+        request
+        for request in plan.numeric_stats_requests
+        if request.field_name in raw_numeric_fields
+        and is_allowed_filter(request.role_group, role_groups)
+        and is_allowed_filter(request.experience_group, experience_groups)
+    ]
+
+    allowed_text_responses = [
+        request
+        for request in plan.text_response_requests
+        if request.field_name in raw_open_text_fields
+        and is_allowed_filter(request.role_group, role_groups)
+        and is_allowed_filter(request.experience_group, experience_groups)
+    ]
+
+    return RetrievalPlan(
+        is_in_scope=plan.is_in_scope,
+        reasoning=plan.reasoning,
+        aggregate_requests=allowed_aggregates,
+        correlation_requests=allowed_correlations,
+        open_topic_requests=allowed_open_topics,
+        numeric_stats_requests=allowed_numeric_stats,
+        text_response_requests=allowed_text_responses,
+    )
+
+
+async def execute_plan(session: AsyncSession, plan: RetrievalPlan) -> dict:
+    aggregates_context: list[dict] = []
+    for request in plan.aggregate_requests:
+        rows = await fetch_aggregate_rows(
+            session,
+            metric_name=request.metric_name,
+            segment_type=request.segment_type,
+            segment_value=request.segment_value,
+            subsegment_type=request.subsegment_type,
+            subsegment_value=request.subsegment_value,
+            limit=min(max(request.limit, 1), 12),
+        )
+        if rows:
+            aggregates_context.append(
+                {
+                    "request": request.model_dump(),
+                    "rows": serialize_aggregate_rows(rows),
+                }
+            )
+
+    correlations_context: list[dict] = []
+    for request in plan.correlation_requests:
+        row = await fetch_correlation_row(
+            session,
+            x_metric=request.x_metric,
+            y_metric=request.y_metric,
+            group_name=request.group_name,
+        )
+        if row is not None:
+            correlations_context.append(
+                {
+                    "request": request.model_dump(),
+                    "row": serialize_correlation_row(row),
+                }
+            )
+
+    open_topics_context: list[dict] = []
+    for request in plan.open_topic_requests:
+        rows = await fetch_open_topics(
+            session,
+            question_field=request.question_field,
+            role_group=request.role_group,
+            experience_group=request.experience_group,
+            topic_name=request.topic_name,
+            limit=min(max(request.limit, 1), 12),
+        )
+        if rows:
+            open_topics_context.append(
+                {
+                    "request": request.model_dump(),
+                    "rows": serialize_open_topic_rows(rows),
+                }
+            )
+
+    numeric_stats_context: list[dict] = []
+    for request in plan.numeric_stats_requests:
+        row = await fetch_numeric_summary(
+            session,
+            field_name=request.field_name,
+            role_group=request.role_group,
+            experience_group=request.experience_group,
+            company_type=request.company_type,
+            company_size_group=request.company_size_group,
+            employment_status=request.employment_status,
+        )
+        if row is not None:
+            numeric_stats_context.append(
+                {
+                    "request": request.model_dump(),
+                    "row": row,
+                }
+            )
+
+    text_responses_context: list[dict] = []
+    for request in plan.text_response_requests:
+        rows = await fetch_text_responses(
+            session,
+            field_name=request.field_name,
+            role_group=request.role_group,
+            experience_group=request.experience_group,
+            company_type=request.company_type,
+            company_size_group=request.company_size_group,
+            employment_status=request.employment_status,
+            sort_by=request.sort_by,
+            limit=min(max(request.limit, 1), 10),
+        )
+        if rows:
+            text_responses_context.append(
+                {
+                    "request": request.model_dump(),
+                    "rows": rows,
+                }
+            )
+
+    return {
+        "aggregates": aggregates_context,
+        "correlations": correlations_context,
+        "open_topics": open_topics_context,
+        "numeric_stats": numeric_stats_context,
+        "text_responses": text_responses_context,
+    }
+
+
+async def generate_grounded_answer(question: str, context_payload: dict) -> GroundedAnswer:
+    user_prompt = (
+        f"Pytanie użytkownika:\n{question}\n\n"
+        "Dane ankiety pobrane przez backend:\n"
+        f"{json.dumps(context_payload, ensure_ascii=False, indent=2)}"
+    )
+    raw_answer = await openai_client.create_json_completion(
+        system_prompt=build_answer_system_prompt(),
+        user_prompt=user_prompt,
+        schema_name="grounded_answer",
+        schema=GROUNDED_ANSWER_SCHEMA,
+    )
+    return GroundedAnswer.model_validate(raw_answer)
 
 
 async def answer_question(question: str, session: AsyncSession) -> ChatResponse:
-    route = route_question(question)
-
-    if route.route == "refusal":
+    if not openai_client.is_configured:
         return ChatResponse(
-            answer=REFUSAL_MESSAGE,
-            answer_type="refusal",
-            source="guardrails",
+            answer=CONFIG_MESSAGE,
+            answer_type="config_error",
+            source="config",
         )
 
-    if route.route == "open_topics" and route.topic_key:
-        rows = await fetch_open_topics(session, route.topic_key, route.segment_key)
-        if not rows:
+    try:
+        catalog = await fetch_catalog(session)
+        plan = await plan_retrieval(question, catalog)
+
+        if not plan.is_in_scope:
+            return ChatResponse(
+                answer=REFUSAL_MESSAGE,
+                answer_type="refusal",
+                source="guardrails",
+            )
+
+        plan = filter_plan_against_catalog(plan, catalog)
+        context_payload = await execute_plan(session, plan)
+
+        if not any(context_payload.values()):
             return ChatResponse(
                 answer=NO_DATA_MESSAGE,
                 answer_type="no_data",
-                source="open_topics",
-                matched_example=route.matched_example,
+                source="guardrails",
             )
 
-        return ChatResponse(
-            answer=render_open_topics_answer(rows[0].segment_label, rows),
-            answer_type="open_topics",
-            source="open_topics",
-            warning=build_small_sample_warning(rows[0].sample_size),
-            matched_example=route.matched_example,
-        )
-
-    if route.route == "sql" and route.metric_key:
-        rows = await fetch_aggregate_rows(session, route.metric_key, route.segment_key)
-        if not rows:
+        grounded = await generate_grounded_answer(question, context_payload)
+        if grounded.insufficient_data:
             return ChatResponse(
                 answer=NO_DATA_MESSAGE,
                 answer_type="no_data",
-                source="sql",
-                matched_example=route.matched_example,
+                source="guardrails",
             )
 
         return ChatResponse(
-            answer=render_aggregate_answer(rows[0].metric_label, rows),
-            answer_type="sql",
-            source="aggregates",
-            warning=build_small_sample_warning(rows[0].sample_size),
-            matched_example=route.matched_example,
+            answer=grounded.answer,
+            answer_type="llm",
+            source="openai+survey_data",
+            warning=compute_warning_from_context(context_payload),
         )
-
-    return ChatResponse(
-        answer=NO_DATA_MESSAGE,
-        answer_type="no_data",
-        source="guardrails",
-        matched_example=route.matched_example,
-    )
+    except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+        return ChatResponse(
+            answer="Nie udało się uzyskać odpowiedzi z modelu LLM. Sprawdź OPENAI_API_KEY i konfigurację połączenia.",
+            answer_type="config_error",
+            source="openai",
+        )

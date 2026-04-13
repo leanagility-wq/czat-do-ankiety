@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,16 +11,32 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     database_url: str = Field(
-        default="postgresql+asyncpg://survey:survey@db:5432/survey_chat"
+        default="postgresql+asyncpg://survey:survey@localhost:5432/survey_chat"
     )
     min_sample_warning_threshold: int = 15
     examples_limit: int = 10
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-5.3-chat-latest"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_timeout_seconds: float = 45.0
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug(cls, value):
+        if isinstance(value, bool):
+            return value
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on", "debug"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "release", ""}:
+            return False
+        return False
 
 
 @lru_cache

@@ -6,9 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import models  # noqa: F401
 from app.config import get_settings
 from app.db import Base, engine, get_db_session
-from app import models  # noqa: F401
 from app.schemas import ChatRequest, ChatResponse, ExampleQuestion, HealthResponse
 from app.services.chat import answer_question
 from app.web import render_index_html
