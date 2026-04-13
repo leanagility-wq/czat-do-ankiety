@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+from collections import defaultdict, deque
+from time import monotonic
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -15,6 +17,7 @@ from app.web import render_index_html
 
 
 settings = get_settings()
+CHAT_REQUEST_LOG: dict[str, deque[float]] = defaultdict(deque)
 
 
 @asynccontextmanager
@@ -55,6 +58,24 @@ async def examples() -> list[ExampleQuestion]:
 @app.post("/chat", response_model=ChatResponse)
 async def chat(
     payload: ChatRequest,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> ChatResponse:
+    client_key = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+    client_key = client_key.split(",")[0].strip() if client_key else "unknown"
+    now = monotonic()
+    window = settings.chat_rate_limit_window_seconds
+    limit = settings.chat_rate_limit_requests
+    request_times = CHAT_REQUEST_LOG[client_key]
+
+    while request_times and now - request_times[0] > window:
+        request_times.popleft()
+
+    if len(request_times) >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Przekroczono limit zapytań. Spróbuj ponownie za około {window} sekund.",
+        )
+
+    request_times.append(now)
     return await answer_question(payload.question, session)

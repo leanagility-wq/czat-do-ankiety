@@ -127,6 +127,10 @@ async function submitQuestion(question) {
     });
 
     const data = await response.json();
+    if (!response.ok) {
+      appendMessage("assistant", data.detail || "Nie udało się przetworzyć zapytania.");
+      return;
+    }
     const meta = [data.source, data.warning].filter(Boolean).join(" \u2022 ");
     appendMessage("assistant", data.answer, meta);
   } catch (error) {

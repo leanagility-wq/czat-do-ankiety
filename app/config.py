@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     )
     min_sample_warning_threshold: int = 15
     examples_limit: int = 10
+    chat_rate_limit_requests: int = 10
+    chat_rate_limit_window_seconds: int = 60
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.3-chat-latest"
     openai_base_url: str = "https://api.openai.com/v1"
